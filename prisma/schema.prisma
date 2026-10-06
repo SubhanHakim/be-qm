@@ -1,0 +1,43 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// Tabel Referensi Parameter IDE
+model Master_Error_IDE {
+  id          Int     @id @default(autoincrement())
+  nama_field  String  @db.VarChar(100)
+  bobot_error Decimal @db.Decimal(3, 1)
+  kategori    String? @db.VarChar(50)
+
+  // Relasi ke tabel log
+  Sendback_Log Sendback_Log[]
+}
+
+// Tabel Log Temuan Analis
+model Sendback_Log {
+  id_log           Int       @id @default(autoincrement())
+  id_aplikasi      String    @db.VarChar(50)
+  tahap_pengecekan String?   @default("IDE") @db.VarChar(50)
+  id_error         Int?
+  tanggal_input    DateTime? @default(now())
+  catatan_tambahan String?   @db.Text
+
+  // Ubah userId_user menjadi id_user agar sinkron dengan Controller
+  id_user Int?
+
+  master_error Master_Error_IDE? @relation(fields: [id_error], references: [id])
+  user         User?             @relation(fields: [id_user], references: [id_user])
+}
+
+model User {
+  id_user      Int            @id @default(autoincrement())
+  username     String         @unique @db.VarChar(50)
+  password     String         @db.VarChar(255)
+  created_at   DateTime       @default(now())
+  role         String         @default("analis") @db.VarChar(50)
+  Sendback_Log Sendback_Log[]
+}
