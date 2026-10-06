@@ -17,6 +17,20 @@ model Master_Error_IDE {
   Sendback_Log Sendback_Log[]
 }
 
+// Tabel Header Aplikasi (Data Identitas per Aplikasi yang Diperiksa)
+model Aplikasi_Header {
+  id              Int      @id @default(autoincrement())
+  id_aplikasi     String   @unique @db.VarChar(50)
+  nama_aplikan    String?  @db.VarChar(150)  // Nama Aplikan (baris 2 form)
+  nama_user_ide   String?  @db.VarChar(100)  // Nama User IDE (baris 3 form)
+  cas_sas         String?  @db.VarChar(20)   // CAS atau SAS (baris 4 form)
+  channel         String?  @db.VarChar(50)   // Telesales / Non Telesales (baris 5 form)
+  tanggal_input   DateTime @default(now())
+  id_user         Int?
+
+  user            User?    @relation(fields: [id_user], references: [id_user])
+}
+
 // Tabel Log Temuan Analis
 model Sendback_Log {
   id_log           Int       @id @default(autoincrement())
@@ -26,7 +40,6 @@ model Sendback_Log {
   tanggal_input    DateTime? @default(now())
   catatan_tambahan String?   @db.Text
 
-  // Ubah userId_user menjadi id_user agar sinkron dengan Controller
   id_user Int?
 
   master_error Master_Error_IDE? @relation(fields: [id_error], references: [id])
@@ -34,10 +47,11 @@ model Sendback_Log {
 }
 
 model User {
-  id_user      Int            @id @default(autoincrement())
-  username     String         @unique @db.VarChar(50)
-  password     String         @db.VarChar(255)
-  created_at   DateTime       @default(now())
-  role         String         @default("analis") @db.VarChar(50)
-  Sendback_Log Sendback_Log[]
+  id_user          Int               @id @default(autoincrement())
+  username         String            @unique @db.VarChar(50)
+  password         String            @db.VarChar(255)
+  created_at       DateTime          @default(now())
+  role             String            @default("analis") @db.VarChar(50)
+  Sendback_Log     Sendback_Log[]
+  Aplikasi_Header  Aplikasi_Header[]
 }
