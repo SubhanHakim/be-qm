@@ -15,6 +15,9 @@ jobs:
   build-and-push:
     name: Build & Push Docker Image to ECR
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
 
     steps:
       - name: Checkout Repository
@@ -24,6 +27,7 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::916207038350:role/github-actions-ecr-role
+          role-session-name: github-actions-ecr-${{ github.run_id }}
           aws-region: ap-southeast-2
 
       - name: Log in to Amazon ECR
