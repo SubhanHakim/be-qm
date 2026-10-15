@@ -6,7 +6,7 @@ on:
   pull_request:
     branches: ["main", "master"]
 
-# BARIS INI WAJIB ADA untuk OIDC
+# PENTING: id-token: write wajib sejajar dengan 'on' dan 'jobs'
 permissions:
   id-token: write
   contents: read
