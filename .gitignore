@@ -80,3 +80,9 @@ desktop.ini
 .claude/
 .windsurf/
 .gemini/
+
+# ==========================================
+# Compose Files
+# ==========================================
+docker/*compose*.yml
+docker/*compose*.yaml
