@@ -35,24 +35,47 @@ const submitIdeCek = async (req, res) => {
       });
     }
 
+    if (!nama_aplikan || !nama_aplikan.trim()) {
+      return res.status(400).json({ msg: "Nama Aplikan wajib diisi." });
+    }
+
+    if (!nama_user_ide || !nama_user_ide.trim()) {
+      return res.status(400).json({ msg: "Nama User IDE wajib diisi." });
+    }
+
+    if (!cas_sas || !cas_sas.trim()) {
+      return res.status(400).json({ msg: "CAS/SAS wajib diisi." });
+    }
+
+    if (!channel || !channel.trim()) {
+      return res.status(400).json({ msg: "Channel wajib dipilih." });
+    }
+
+    const validChannels = ["MKK", "Bulk Upload", "CAKRA", "RM Tools"];
+    if (!validChannels.includes(channel.trim())) {
+      return res.status(400).json({
+        msg: `Channel tidak valid. Pilih salah satu: ${validChannels.join(", ")}.`,
+      });
+    }
+
     // Gunakan transaction agar header & log tersimpan bersama-sama
     const result = await prisma.$transaction(async (tx) => {
       // 1. Simpan/update header aplikasi (data identitas: nama aplikan, user IDE, dll)
       const header = await tx.aplikasi_Header.upsert({
         where: { id_aplikasi: id_aplikasi },
         update: {
-          nama_aplikan: nama_aplikan || null,
-          nama_user_ide: nama_user_ide || null,
-          cas_sas: cas_sas || null,
-          channel: channel || null,
+          nama_aplikan: nama_aplikan.trim(),
+          nama_user_ide: nama_user_ide.trim(),
+          cas_sas: cas_sas.trim(),
+          channel: channel.trim(),
           id_user: id_user_aktif,
         },
         create: {
           id_aplikasi,
-          nama_aplikan: nama_aplikan || null,
-          nama_user_ide: nama_user_ide || null,
-          cas_sas: cas_sas || null,
-          channel: channel || null,
+          nama_aplikan: nama_aplikan.trim(),
+          nama_user_ide: nama_user_ide.trim(),
+          cas_sas: cas_sas.trim(),
+          channel: channel.trim(),
           id_user: id_user_aktif,
         },
       });
@@ -390,6 +413,277 @@ const getAplikasiHeader = async (req, res) => {
   }
 };
 
+// Fungsi 7: Rekap agregat bulanan
+// Query: ?bulan=10&tahun=2026
+const getRekapBulanan = async (req, res) => {
+  try {
+    const bulan = parseInt(req.query.bulan);
+    const tahun = parseInt(req.query.tahun);
+
+    if (!bulan || bulan < 1 || bulan > 12) {
+      return res.status(400).json({ msg: "Parameter bulan wajib diisi (1–12)." });
+    }
+    if (!tahun || tahun < 2000 || tahun > 2100) {
+      return res.status(400).json({ msg: "Parameter tahun wajib diisi (format: YYYY)." });
+    }
+
+    const startDate = new Date(tahun, bulan - 1, 1);
+    const endDate   = new Date(tahun, bulan, 1);
+
+    // Ambil semua header di periode tersebut beserta user (analis)
+    const headers = await prisma.aplikasi_Header.findMany({
+      where: {
+        tanggal_input: { gte: startDate, lt: endDate },
+      },
+      include: {
+        user: { select: { username: true } },
+      },
+    });
+
+    const idAplikasiList = headers.map((h) => h.id_aplikasi);
+
+    // Ambil semua log error untuk aplikasi di periode tersebut
+    const logs = await prisma.sendback_Log.findMany({
+      where: {
+        id_aplikasi: { in: idAplikasiList },
+      },
+      include: {
+        master_error: true,
+      },
+    });
+
+    // Bangun map: id_aplikasi → { total_bobot, hasFatal, errors[] }
+    const appMap = new Map();
+    for (const h of headers) {
+      appMap.set(h.id_aplikasi, {
+        channel:      h.channel || "Tidak Diketahui",
+        analis:       h.user?.username || "Unknown",
+        total_bobot:  0,
+        hasFatal:     false,
+        jumlah_error: 0,
+      });
+    }
+
+    // Hitung frekuensi error untuk top_error
+    const errorFreqMap = new Map(); // id_error → { nama_field, kategori, bobot, frekuensi }
+
+    for (const log of logs) {
+      const app = appMap.get(log.id_aplikasi);
+      if (!app) continue;
+
+      if (log.master_error) {
+        const bobot = log.master_error.bobot_error != null
+          ? parseFloat(log.master_error.bobot_error.toString())
+          : 0;
+        const isFatal =
+          (log.master_error.kategori || "").toLowerCase().includes("fatal") || bobot >= 1.0;
+
+        app.total_bobot = parseFloat((app.total_bobot + bobot).toFixed(2));
+        if (isFatal) app.hasFatal = true;
+        app.jumlah_error += 1;
+
+        // Akumulasi frekuensi error
+        const errId = log.master_error.id;
+        if (!errorFreqMap.has(errId)) {
+          errorFreqMap.set(errId, {
+            id_error:   errId,
+            nama_field: log.master_error.nama_field,
+            kategori:   log.master_error.kategori || "-",
+            bobot,
+            frekuensi:  0,
+          });
+        }
+        errorFreqMap.get(errId).frekuensi += 1;
+      }
+    }
+
+    // Hitung ringkasan, per_channel, per_analis
+    let totalFatal = 0, totalMinor = 0, totalLolos = 0;
+    const channelMap = {};
+    const analisMap  = {};
+
+    for (const [, app] of appMap) {
+      // Status aplikasi
+      let status;
+      if (app.hasFatal)          { status = "Fatal"; totalFatal++; }
+      else if (app.total_bobot > 0) { status = "Minor"; totalMinor++; }
+      else                          { status = "Lolos"; totalLolos++; }
+
+      // Per channel
+      if (!channelMap[app.channel]) {
+        channelMap[app.channel] = { channel: app.channel, total_aplikasi: 0, total_error: 0 };
+      }
+      channelMap[app.channel].total_aplikasi += 1;
+      channelMap[app.channel].total_error    += app.jumlah_error;
+
+      // Per analis
+      if (!analisMap[app.analis]) {
+        analisMap[app.analis] = {
+          username:        app.analis,
+          total_aplikasi:  0,
+          total_error:     0,
+          total_fatal:     0,
+          total_minor:     0,
+          total_lolos:     0,
+        };
+      }
+      const a = analisMap[app.analis];
+      a.total_aplikasi  += 1;
+      a.total_error     += app.jumlah_error;
+      if (status === "Fatal")  a.total_fatal++;
+      else if (status === "Minor") a.total_minor++;
+      else                         a.total_lolos++;
+    }
+
+    const totalAplikasi = headers.length;
+    const totalError    = logs.length;
+    const rataBobot     = totalAplikasi > 0
+      ? parseFloat((logs.reduce((sum, l) => {
+          const b = l.master_error?.bobot_error != null
+            ? parseFloat(l.master_error.bobot_error.toString()) : 0;
+          return sum + b;
+        }, 0) / totalAplikasi).toFixed(2))
+      : 0;
+
+    // Top 10 error
+    const topError = Array.from(errorFreqMap.values())
+      .sort((a, b) => b.frekuensi - a.frekuensi)
+      .slice(0, 10);
+
+    const namaBulan = new Date(tahun, bulan - 1, 1)
+      .toLocaleDateString("id-ID", { month: "long", year: "numeric" });
+
+    res.json({
+      periode:    namaBulan,
+      bulan,
+      tahun,
+      ringkasan: {
+        total_aplikasi: totalAplikasi,
+        total_error:    totalError,
+        rata_rata_bobot: rataBobot,
+        total_fatal:    totalFatal,
+        total_minor:    totalMinor,
+        total_lolos:    totalLolos,
+      },
+      per_channel: Object.values(channelMap),
+      per_analis:  Object.values(analisMap),
+      top_error:   topError,
+    });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send("Server Error");
+  }
+};
+
+// Fungsi 8: Daftar detail aplikasi per bulan (drill-down)
+// Query: ?bulan=10&tahun=2026&channel=MKK&analis=analis_a&status=fatal
+const getRekapBulananDetail = async (req, res) => {
+  try {
+    const bulan   = parseInt(req.query.bulan);
+    const tahun   = parseInt(req.query.tahun);
+    const channel = req.query.channel || null;
+    const analis  = req.query.analis  || null;
+    const status  = req.query.status  || null; // "fatal" | "minor" | "lolos"
+
+    if (!bulan || bulan < 1 || bulan > 12) {
+      return res.status(400).json({ msg: "Parameter bulan wajib diisi (1–12)." });
+    }
+    if (!tahun || tahun < 2000 || tahun > 2100) {
+      return res.status(400).json({ msg: "Parameter tahun wajib diisi (format: YYYY)." });
+    }
+
+    const startDate = new Date(tahun, bulan - 1, 1);
+    const endDate   = new Date(tahun, bulan, 1);
+
+    // Ambil header dengan filter channel & analis jika ada
+    const headers = await prisma.aplikasi_Header.findMany({
+      where: {
+        tanggal_input: { gte: startDate, lt: endDate },
+        ...(channel ? { channel } : {}),
+        ...(analis  ? { user: { username: analis } } : {}),
+      },
+      include: {
+        user: { select: { username: true, role: true } },
+      },
+      orderBy: { tanggal_input: "desc" },
+    });
+
+    const idAplikasiList = headers.map((h) => h.id_aplikasi);
+
+    const logs = await prisma.sendback_Log.findMany({
+      where: { id_aplikasi: { in: idAplikasiList } },
+      include: { master_error: true },
+    });
+
+    // Bangun map error per aplikasi
+    const errorMap = new Map();
+    for (const log of logs) {
+      if (!errorMap.has(log.id_aplikasi)) {
+        errorMap.set(log.id_aplikasi, { total_bobot: 0, hasFatal: false, errors: [] });
+      }
+      const curr = errorMap.get(log.id_aplikasi);
+      if (log.master_error) {
+        const bobot = log.master_error.bobot_error != null
+          ? parseFloat(log.master_error.bobot_error.toString()) : 0;
+        const isFatal =
+          (log.master_error.kategori || "").toLowerCase().includes("fatal") || bobot >= 1.0;
+
+        curr.total_bobot = parseFloat((curr.total_bobot + bobot).toFixed(2));
+        if (isFatal) curr.hasFatal = true;
+        curr.errors.push({
+          id_error:   log.master_error.id,
+          nama_field: log.master_error.nama_field,
+          kategori:   log.master_error.kategori,
+          bobot,
+        });
+      }
+    }
+
+    // Gabungkan & hitung status
+    let data = headers.map((h) => {
+      const errData = errorMap.get(h.id_aplikasi) || { total_bobot: 0, hasFatal: false, errors: [] };
+      let appStatus;
+      if (errData.hasFatal)            appStatus = "Fatal";
+      else if (errData.total_bobot > 0) appStatus = "Minor";
+      else                              appStatus = "Lolos";
+
+      return {
+        id_aplikasi:   h.id_aplikasi,
+        nama_aplikan:  h.nama_aplikan,
+        nama_user_ide: h.nama_user_ide,
+        cas_sas:       h.cas_sas,
+        channel:       h.channel,
+        tanggal_input: h.tanggal_input,
+        analis:        h.user?.username || null,
+        total_bobot:   errData.total_bobot,
+        jumlah_error:  errData.errors.length,
+        status:        appStatus,
+        errors:        errData.errors,
+      };
+    });
+
+    // Filter status jika ada
+    if (status) {
+      const statusNorm = status.charAt(0).toUpperCase() + status.slice(1).toLowerCase();
+      data = data.filter((d) => d.status === statusNorm);
+    }
+
+    const namaBulan = new Date(tahun, bulan - 1, 1)
+      .toLocaleDateString("id-ID", { month: "long", year: "numeric" });
+
+    res.json({
+      periode:        namaBulan,
+      bulan,
+      tahun,
+      total_aplikasi: data.length,
+      data,
+    });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send("Server Error");
+  }
+};
+
 module.exports = {
   getIdeParameters,
   submitIdeCek,
@@ -397,4 +691,6 @@ module.exports = {
   getIdeReportDetail,
   updateIdeReport,
   getAplikasiHeader,
+  getRekapBulanan,
+  getRekapBulananDetail,
 };

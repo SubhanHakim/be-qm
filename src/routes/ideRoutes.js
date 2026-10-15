@@ -8,6 +8,8 @@ const {
   getIdeReportDetail,
   updateIdeReport,
   getAplikasiHeader,
+  getRekapBulanan,
+  getRekapBulananDetail,
 } = require("../controllers/ideController");
 const verifyToken = require("../middlewares/authMiddleware");
 
@@ -16,6 +18,10 @@ router.get("/parameters", verifyToken, getIdeParameters);
 
 // Endpoint POST: Submit hasil ceklis (termasuk nama aplikan, user IDE, CAS/SAS, channel)
 router.post("/submit", verifyToken, submitIdeCek);
+
+// Endpoint GET: Rekapitulasi bulanan
+router.get("/rekap/bulanan", verifyToken, getRekapBulanan);
+router.get("/rekap/bulanan/detail", verifyToken, getRekapBulananDetail);
 
 // Endpoint GET: Ringkasan laporan semua aplikasi
 router.get("/report", verifyToken, getIdeReport);
