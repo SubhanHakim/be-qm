@@ -6,7 +6,6 @@ on:
   pull_request:
     branches: ["main", "master"]
 
-# PENTING: id-token: write wajib sejajar dengan 'on' dan 'jobs'
 permissions:
   id-token: write
   contents: read
@@ -19,6 +18,12 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+
+      - name: Debug OIDC claim
+        run: |
+          TOKEN=$(curl -sH "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=sts.amazonaws.com" | jq -r .value)
+          PAYLOAD=$(echo "$TOKEN" | cut -d. -f2 | tr '_-' '/+')
+          echo "${PAYLOAD}==" | base64 -d 2>/dev/null | jq '{sub, aud}'
 
       - name: Configure AWS Credentials (via OIDC)
         uses: aws-actions/configure-aws-credentials@v4
