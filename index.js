@@ -28,14 +28,8 @@ app.get("/api/ide-parameters", async (req, res) => {
 
 app.use("/api/ide", ideRoutes);
 app.use("/api/auth", authRoutes);
-app.get("/api/health", async (req, res) => {
-  try {
-    await pool.query("SELECT 1");
-    res.send("OK");
-  } catch (err) {
-    console.error(err.message);
-    res.status(500).send("Server Error");
-  }
+app.get("/api/health", (req, res) => {
+  res.json({ status: "ok" });
 });
 
 const PORT = process.env.PORT || 5000;
