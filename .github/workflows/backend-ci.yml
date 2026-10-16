@@ -65,8 +65,10 @@ jobs:
           IMAGE="$REGISTRY/qm-backend:${{ github.sha }}"
           cat > params.json <<EOF
           {"commands":[
+            "set -e",
             "/snap/bin/aws ecr get-login-password --region ap-southeast-2 | docker login --username AWS --password-stdin $REGISTRY",
             "docker pull $IMAGE",
+            "docker run --rm --network qm-net --env-file /home/ubuntu/qm-backend.env $IMAGE npx prisma migrate deploy",
             "docker rm -f qm-backend || true",
             "docker run -d --name qm-backend --network qm-net --restart unless-stopped -p 80:3000 --env-file /home/ubuntu/qm-backend.env $IMAGE",
             "docker image prune -f"
