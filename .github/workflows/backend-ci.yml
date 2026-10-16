@@ -71,7 +71,8 @@ jobs:
             "docker run --rm --network qm-net --env-file /home/ubuntu/qm-backend.env $IMAGE npx prisma migrate deploy",
             "docker rm -f qm-backend || true",
             "docker run -d --name qm-backend --network qm-net --restart unless-stopped -p 80:3000 --env-file /home/ubuntu/qm-backend.env $IMAGE",
-            "docker image prune -f"
+            "docker image prune -f",
+            "for i in 1 2 3 4 5 6 7 8 9 10; do curl -fs http://localhost/api/health && exit 0; sleep 2; done; docker logs --tail 30 qm-backend; exit 1"
           ]}
           EOF
           CMD_ID=$(aws ssm send-command \
