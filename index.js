@@ -28,7 +28,7 @@ app.get("/api/ide-parameters", async (req, res) => {
 
 app.use("/api/ide", ideRoutes);
 app.use("/api/auth", authRoutes);
-app.get("/api/health", (req, res) => {
+app.get("/api/healthx", (req, res) => {
   res.json({ status: "ok" });
 });
 
